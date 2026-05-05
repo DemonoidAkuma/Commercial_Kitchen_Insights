@@ -1,0 +1,153 @@
+<html>
+<head>
+<style>
+
+body {
+    font-family: Arial, sans-serif;
+    color: #1F2937;
+    padding: 30px;
+}
+
+/* HEADER */
+.header {
+    border-bottom: 2px solid #E5E7EB;
+    margin-bottom: 25px;
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 24px;
+}
+
+.header p {
+    margin: 5px 0 0;
+    color: #6B7280;
+}
+
+/* KPI GRID */
+.grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-bottom: 30px;
+}
+
+.card {
+    background: #F5F7FA;
+    padding: 15px;
+    border-radius: 10px;
+}
+
+.card-title {
+    font-size: 11px;
+    color: #6B7280;
+}
+
+.card-value {
+    font-size: 20px;
+    font-weight: bold;
+    margin-top: 5px;
+}
+
+/* SECTION */
+.section {
+    margin-top: 30px;
+}
+
+.section h2 {
+    font-size: 16px;
+    border-bottom: 1px solid #E5E7EB;
+    padding-bottom: 5px;
+}
+
+/* LIST */
+ul {
+    padding-left: 18px;
+}
+
+/* TABLE */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+th {
+    text-align: left;
+    font-size: 12px;
+    color: #6B7280;
+    border-bottom: 1px solid #E5E7EB;
+    padding: 6px;
+}
+
+td {
+    padding: 6px;
+    font-size: 12px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="header">
+    <h1>{{ venue_name }}</h1>
+    <p>{{ period_label }}</p>
+</div>
+
+<div class="grid">
+    <div class="card"><div class="card-title">Revenue</div><div class="card-value">{{ revenue }}</div></div>
+    <div class="card"><div class="card-title">Purchases</div><div class="card-value">{{ purchases }}</div></div>
+    <div class="card"><div class="card-title">Budget</div><div class="card-value">{{ revenue_target }}</div></div>
+    <div class="card"><div class="card-title">Variance</div><div class="card-value">{{ revenue_var }}</div></div>
+
+    <div class="card"><div class="card-title">Food Cost %</div><div class="card-value">{{ food_cost }}</div></div>
+    <div class="card"><div class="card-title">Waste %</div><div class="card-value">{{ waste_pct }}</div></div>
+    <div class="card"><div class="card-title">Closing Stock</div><div class="card-value">{{ stock }}</div></div>
+    <div class="card"><div class="card-title">Waste $</div><div class="card-value">{{ waste_total }}</div></div>
+</div>
+
+<div class="section">
+    <h2>Executive Commentary</h2>
+    <ul>
+        {% for line in commentary.split('.') %}
+            {% if line.strip() %}
+                <li>{{ line.strip() }}</li>
+            {% endif %}
+        {% endfor %}
+    </ul>
+</div>
+
+<div class="section">
+    <h2>Top Wasted Items</h2>
+    <table>
+        <tr>
+            <th>Item</th>
+            <th>Qty</th>
+            <th>Total</th>
+        </tr>
+        {% for row in waste_table %}
+        <tr>
+            <td>{{ row[0] }}</td>
+            <td>{{ row[1] }}</td>
+            <td>{{ row[2] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+<div class="section">
+    <h2>Item Performance</h2>
+    <table>
+        {% for row in item_performance %}
+        <tr>
+            {% for col in row %}
+                <td>{{ col }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+</body>
+</html>
