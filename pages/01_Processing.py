@@ -1,47 +1,73 @@
 import streamlit as st
+from utils.ui import apply_global_style, sidebar_branding
+
 st.set_page_config(
     page_title="Commercial Kitchen Insights",
     page_icon="assets/cki_icon.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+apply_global_style()
+sidebar_branding()
+import os
+import pandas as pd
+from collections import defaultdict
+
+if st.session_state.get("role") != "admin":
+    st.error("Admin access only.")
+    st.stop()
+
 st.markdown("""
 <style>
 
-/* Sidebar background */
+/* ---------- SIDEBAR ---------- */
 section[data-testid="stSidebar"] {
     background-color: #111111;
+    border-right: 1px solid #222;
 }
 
-/* Sidebar text */
+/* Default sidebar text stays light */
 section[data-testid="stSidebar"] * {
     color: #EAEAEA !important;
 }
 
-/* Radio buttons & selectboxes */
-section[data-testid="stSidebar"] .stRadio label,
-section[data-testid="stSidebar"] .stSelectbox label {
-    color: #EAEAEA !important;
+/* ---------- SELECTBOX TEXT (black inside white boxes) ---------- */
+section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {
+    color: black !important;
 }
 
-/* Sidebar small text */
-section[data-testid="stSidebar"] p {
-    color: #CCCCCC !important;
+/* Dropdown menu items */
+div[data-baseweb="menu"] * {
+    color: black !important;
+}
+
+/* ---------- EXPANDER HEADER ---------- */
+/* Keep venue names white */
+section[data-testid="stSidebar"] .streamlit-expanderHeader {
+    color: #EAEAEA !important;
+    font-weight: 600;
+}
+
+/* ---------- BUTTONS ---------- */
+.stButton > button {
+    background-color: #202020;
+    color: white;
+    border-radius: 12px;
+    border: 1px solid #333;
+    font-weight: 600;
+    width: 100%;
+}
+
+.stButton > button:hover {
+    border: 1px solid #666;
+    background-color: #2B2B2B;
+    color: white;
 }
 
 </style>
-""", unsafe_allow_html=True)
-import os
-import pandas as pd
-with st.sidebar:
-     st.image("assets/cki_logo_reverse.png", width="stretch")
-st.markdown("""
-    <style>
-        section[data-testid="stSidebar"] {
-            background-color: #111111;
-        }
-    </style>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True)           
+
 from database import SalesLine, WasteLine
 from database import Session, Period
 from parser import (
@@ -53,10 +79,12 @@ from parser import (
 )
 from kpi_engine import calculate_waste_percent, risk_rating
 
-st.title("Commercial Kitchen Insights")
-st.subheader("Full Transparency")
 
-DATA_FOLDER = "data"
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_FOLDER = PROJECT_ROOT / "data"
+
 
 VENUE_CONFIG = {
     "The_Amberton": {"target": 30.0, "type": "HOSPITALITY"},
@@ -89,6 +117,11 @@ def process_period(venue, period_path, report_type):
     session = Session()
     files = os.listdir(period_path)
     period_name = os.path.basename(period_path)
+    financial_year = os.path.basename(
+        os.path.dirname(
+            os.path.dirname(period_path)
+        )
+    )
 
     revenue_file = next((f for f in files if "Revenue" in f and f.endswith(".pdf")), None)
     purchases_file = next((f for f in files if "Purchases" in f and f.endswith(".pdf")), None)
@@ -207,6 +240,7 @@ def process_period(venue, period_path, report_type):
     )
     existing = session.query(Period).filter_by(
         venue=venue,
+        financial_year=selected_fy,
         period=period_name,
         report_type=report_type,
     ).first()
@@ -214,6 +248,7 @@ def process_period(venue, period_path, report_type):
     if existing:
         existing.revenue = revenue
         existing.cogs = cogs
+        existing.financial_year = financial_year
         existing.food_cost_percent = food_cost_percent
         existing.waste_total = waste
         existing.waste_percent = waste_percent
@@ -230,7 +265,8 @@ def process_period(venue, period_path, report_type):
 
     else:
         new_period = Period(
-            venue=venue,
+            venue=venue,   # ✅ SINGLE STRING
+            financial_year=selected_fy,
             period=period_name,
             report_type=report_type,
             revenue=revenue,
@@ -365,23 +401,118 @@ def process_period(venue, period_path, report_type):
 # -----------------------------
 # Sidebar
 # -----------------------------
+# -----------------------------
+# Sidebar
+# -----------------------------
 st.sidebar.header("Process New Period")
-report_type = st.sidebar.selectbox("Report Type", ["14", "28"])
 
+# Detect Financial Years
+fy_set = set()
+
+for venue in os.listdir(DATA_FOLDER):
+
+    venue_path = os.path.join(DATA_FOLDER, venue)
+
+    if not os.path.isdir(venue_path):
+        continue
+
+    try:
+        folders = os.listdir(venue_path)
+    except Exception:
+        continue
+
+    for folder in folders:
+
+        folder_path = os.path.join(
+            venue_path,
+            folder
+        )
+
+        if (
+            os.path.isdir(folder_path)
+            and folder.upper().startswith("FY")
+        ):
+            fy_set.add(folder.upper())
+
+# -----------------------------
+# Available FYs
+# -----------------------------
+AVAILABLE_FYS = sorted(
+    list(fy_set),
+    reverse=True
+)
+
+# Safety check
+if not AVAILABLE_FYS:
+    st.error(
+        "No FY folders found.\n\n"
+        "Expected structure:\n"
+        "data/Venue/FY26/14/01/"
+    )
+    st.stop()
+
+# -----------------------------
+# Sidebar Controls
+# -----------------------------
+selected_fy = st.sidebar.selectbox(
+    "Financial Year",
+    AVAILABLE_FYS,
+    index=0
+)
+
+report_type = st.sidebar.selectbox(
+    "Report Type",
+    ["14", "28"],
+    index=0
+)
+
+# -----------------------------
+# Reprocess All
+# -----------------------------
 if st.sidebar.button("🚀 Reprocess ALL Venues"):
-    for venue in venues:
-        venue_path = os.path.join(DATA_FOLDER, venue)
-        report_folder = os.path.join(venue_path, report_type)
 
-        if not os.path.exists(report_folder):
+    processed_count = 0
+
+    for venue in venues:
+
+        venue_path = os.path.join(
+            DATA_FOLDER,
+            venue
+        )
+
+        report_folder = os.path.join(
+            venue_path,
+            selected_fy,
+            report_type
+        )
+
+        if not os.path.isdir(report_folder):
             continue
 
-        periods = sorted(os.listdir(report_folder), reverse=True)
+        periods = sorted(
+            os.listdir(report_folder),
+            reverse=True
+        )
 
         for period in periods:
-            period_path = os.path.join(report_folder, period)
-            process_period(venue, period_path, report_type)
-    st.success("All Venues Reprocessed Succesfully") 
+
+            period_path = os.path.join(
+                report_folder,
+                period
+            )
+
+            if os.path.isdir(period_path):
+                process_period(
+                    venue,
+                    period_path,
+                    report_type
+                )
+                processed_count += 1
+
+    st.success(
+        f"✅ Reprocessed {processed_count} periods successfully."
+    )
+
 
 
 # -----------------------------
@@ -397,7 +528,11 @@ for venue in sorted(venues):
     if not os.path.isdir(venue_path):
         continue
 
-    report_folder = os.path.join(venue_path, report_type)
+    report_folder = os.path.join(
+        venue_path,
+        selected_fy,
+        report_type
+    )
 
     if not os.path.exists(report_folder):
         continue
@@ -419,6 +554,7 @@ for venue in sorted(venues):
 
                 existing = session.query(Period).filter_by(
                     venue=venue,
+                    financial_year=selected_fy,
                     period=period,
                     report_type=report_type
                 ).first()
@@ -452,6 +588,7 @@ for venue in sorted(venues):
 
             existing = session.query(Period).filter_by(
                 venue=venue,
+                financial_year=selected_fy,
                 period=period,
                 report_type=report_type
             ).first()
@@ -501,320 +638,395 @@ else:
     from collections import defaultdict
     import pandas as pd
 
-    venue_history = defaultdict(list)
+    from collections import defaultdict
 
-    for p in periods:
-        venue_history[p.venue].append(p)
+# --------------------------------
+# Group: Venue → FY → Period
+# --------------------------------
+# --------------------------------
+# Group: Venue → FY → Report Type → Period
+# --------------------------------
+venue_history = defaultdict(
+    lambda: defaultdict(
+        lambda: defaultdict(list)
+    )
+)
 
-    for venue, venue_periods in venue_history.items():
+for p in periods:
+    fy = p.financial_year or "Unknown FY"
 
-        venue_periods = sorted(venue_periods, key=lambda x: x.period)
+    venue_history[p.venue][fy][
+        p.report_type
+    ].append(p)
 
-        st.markdown("---")
-        st.subheader(venue)
+for venue, fy_groups in venue_history.items():
 
-        previous_by_type = {}
+    st.markdown("---")
+    st.subheader(f"📍 {venue}")
 
-        for p in venue_periods:
+    # -----------------------------
+    # Financial Year
+    # -----------------------------
+    for fy in sorted(
+        fy_groups.keys(),
+        reverse=True
+    ):
 
-            venue_config = VENUE_CONFIG.get(venue, {"target": 30.0})
-            target_percent = venue_config["target"]
+        with st.expander(
+            f"📁 {fy}",
+            expanded=(fy == selected_fy)
+        ):
 
-            purchase_budget = p.revenue * (target_percent / 100)
-            purchase_variance = purchase_budget - p.cogs
+            # -----------------------------
+            # Report Type Folder
+            # -----------------------------
+            for rpt_type in ["14", "28"]:
 
-            food_variance_percent = p.food_cost_percent - target_percent
-            waste_variance_percent = p.waste_percent - WASTE_TARGET
+                if rpt_type not in fy_groups[fy]:
+                    continue
 
-            food_arrow = ""
-            waste_arrow = ""
+                with st.expander(
+                    f"📂 {rpt_type}-Day Reports",
+                    expanded=False
+                ):
 
-            previous = previous_by_type.get(p.report_type)
-
-            if previous:
-                if p.food_cost_percent > previous.food_cost_percent:
-                    food_arrow = "↑"
-                elif p.food_cost_percent < previous.food_cost_percent:
-                    food_arrow = "↓"
-
-                if p.waste_percent > previous.waste_percent:
-                    waste_arrow = "↑"
-                elif p.waste_percent < previous.waste_percent:
-                    waste_arrow = "↓"
-
-            with st.expander(f"📅 {p.period} ({p.report_type}-Day)", expanded=False):
-
-                # =============================
-                # KPI SECTION
-                # =============================
-
-                col1, col2, col3, col4 = st.columns(4)
-
-                col1.metric("Revenue", f"${p.revenue:,.0f}")
-                col2.metric("Purchases", f"${p.cogs:,.0f}")
-                col3.metric("Budget $", f"${purchase_budget:,.0f}")
-                col4.metric(
-                    "Variance $",
-                    f"${purchase_variance:,.0f}",
-                    delta=f"{purchase_variance:,.0f}",
-                )
-
-                col5, col6, col7, col8 = st.columns(4)
-
-                col5.metric(
-                    f"Food Cost % (Target {target_percent:.1f}%)",
-                    f"{p.food_cost_percent:.2f}% {food_arrow}",
-                    delta=f"{food_variance_percent:+.2f}% vs Target",
-                    delta_color="inverse",
-                )
-
-                col6.metric(
-                    f"Waste % (Target {WASTE_TARGET:.1f}%)",
-                    f"{p.waste_percent:.2f}% {waste_arrow}",
-                    delta=f"{waste_variance_percent:+.2f}% vs Target",
-                    delta_color="inverse",
-                )
-
-                col7.metric("Closing Stock", f"${p.closing_stock:,.0f}")
-                col8.metric("Waste $", f"${p.waste_total:,.0f}")
-
-                
-
-                # =============================
-                # EXECUTIVE COMMENTARY
-                # =============================
-
-                commentary = []
-
-                # ---- Food Cost Commentary ----
-                if food_variance_percent < -1:
-                    commentary.append("Food cost performing strongly under target.")
-                elif food_variance_percent < 0:
-                    commentary.append("Food cost slightly under target.")
-                elif food_variance_percent <= 1:
-                    commentary.append("Food cost slightly above target — monitor closely.")
-                else:
-                    commentary.append("Food cost materially above target — corrective action recommended.")
-
-
-                # ---- Waste Driver Commentary (Database) ----
-                waste_records = (
-                  session.query(WasteLine)
-                 .filter(WasteLine.period_id == p.id)
-                 .all()
-                )
-
-                if waste_records:
-
-                 df_waste = pd.DataFrame([{
-                     "item": w.item,
-                     "reason": w.reason,
-                     "total": w.total
-                 } for w in waste_records])
-
-                # --- Top Waste Reason ---
-                 reason_summary = (
-                     df_waste.groupby("reason", as_index=False)
-                     .agg({"total": "sum"})
-                     .sort_values("total", ascending=False)
+                    venue_periods = sorted(
+                        fy_groups[fy][rpt_type],
+                        key=lambda x: x.period,
+                        reverse=True
                     )
 
-                 largest_reason = reason_summary.iloc[0]["reason"]
-                 largest_value = reason_summary.iloc[0]["total"]
+                    previous = None
 
-                 commentary.append(
-                     f"Primary waste driver: {largest_reason} (${largest_value:,.0f})."
+                    for p in venue_periods:
+
+                        with st.expander(
+                            f"📅 Period {p.period}",
+                            expanded=False
+                        ):
+
+                            venue_config = VENUE_CONFIG.get(
+                                venue,
+                                {"target": 30.0}
+                            )
+
+                            target_percent = venue_config["target"]
+
+                            purchase_budget = (
+                                p.revenue *
+                                (target_percent / 100)
+                            )
+
+                            purchase_variance = (
+                                purchase_budget - p.cogs
+                            )
+
+                            food_variance_percent = (
+                                p.food_cost_percent
+                                - target_percent
+                            )
+
+                            waste_variance_percent = (
+                                p.waste_percent
+                                - WASTE_TARGET
+                            )
+
+                            food_arrow = ""
+                            waste_arrow = ""
+
+                            if previous:
+
+                                if p.food_cost_percent > previous.food_cost_percent:
+                                    food_arrow = "↑"
+                                elif p.food_cost_percent < previous.food_cost_percent:
+                                    food_arrow = "↓"
+
+                                if p.waste_percent > previous.waste_percent:
+                                    waste_arrow = "↑"
+                                elif p.waste_percent < previous.waste_percent:
+                                    waste_arrow = "↓"
+
+                            # =============================
+                            # KPI SECTION
+                            # =============================
+
+                            col1, col2, col3, col4 = st.columns(4)
+
+                            col1.metric("Revenue", f"${p.revenue:,.0f}")
+                            col2.metric("Purchases", f"${p.cogs:,.0f}")
+                            col3.metric("Budget $", f"${purchase_budget:,.0f}")
+                            col4.metric(
+                                "Variance $",
+                                f"${purchase_variance:,.0f}",
+                            )
+
+                            col5, col6, col7, col8 = st.columns(4)
+
+                            col5.metric(
+                                f"Food Cost % (Target {target_percent:.1f}%)",
+                                f"{p.food_cost_percent:.2f}% {food_arrow}",
+                                delta=f"{food_variance_percent:+.2f}% vs Target",
+                                delta_color="inverse",
+                            )
+
+                            col6.metric(
+                                f"Waste % (Target {WASTE_TARGET:.1f}%)",
+                                f"{p.waste_percent:.2f}% {waste_arrow}",
+                                delta=f"{waste_variance_percent:+.2f}% vs Target",
+                                delta_color="inverse",
+                            )
+
+                            col7.metric(
+                                "Closing Stock",
+                                f"${p.closing_stock:,.0f}"
+                            )
+
+                            col8.metric(
+                                "Waste $",
+                                f"${p.waste_total:,.0f}"
+                            )
+
+                            previous = p
+                                                # =============================
+                    # EXECUTIVE COMMENTARY
+                    # =============================
+
+                    commentary = []
+
+                    # ---- Food Cost Commentary ----
+                    if food_variance_percent < -1:
+                        commentary.append(
+                            "Food cost performing strongly under target."
+                        )
+                    elif food_variance_percent < 0:
+                        commentary.append(
+                            "Food cost slightly under target."
+                        )
+                    elif food_variance_percent <= 1:
+                        commentary.append(
+                            "Food cost slightly above target — monitor closely."
+                        )
+                    else:
+                        commentary.append(
+                            "Food cost materially above target — corrective action recommended."
+                        )
+
+                    # ---- Waste Driver Commentary ----
+                    waste_records = (
+                        session.query(WasteLine)
+                        .filter(WasteLine.period_id == p.id)
+                        .all()
                     )
 
-               # --- Top Wasted Item ---
-                 item_summary = (
-                     df_waste.groupby("item", as_index=False)
-                     .agg({"total": "sum"})
-                     .sort_values("total", ascending=False)
+                    if waste_records:
+
+                        df_waste = pd.DataFrame([{
+                            "item": w.item,
+                            "reason": w.reason,
+                            "total": w.total
+                        } for w in waste_records])
+
+                        # Top Waste Reason
+                        reason_summary = (
+                            df_waste.groupby(
+                                "reason",
+                                as_index=False
+                            )
+                            .agg({"total": "sum"})
+                            .sort_values(
+                                "total",
+                                ascending=False
+                            )
+                        )
+
+                        largest_reason = reason_summary.iloc[0]["reason"]
+                        largest_value = reason_summary.iloc[0]["total"]
+
+                        commentary.append(
+                            f"Primary waste driver: "
+                            f"{largest_reason} "
+                            f"(${largest_value:,.0f})."
+                        )
+
+                        # Top Wasted Item
+                        item_summary = (
+                            df_waste.groupby(
+                                "item",
+                                as_index=False
+                            )
+                            .agg({"total": "sum"})
+                            .sort_values(
+                                "total",
+                                ascending=False
+                            )
+                        )
+
+                        top_item = item_summary.iloc[0]
+
+                        commentary.append(
+                            f"Highest wasted product: "
+                            f"{top_item['item']} "
+                            f"(${top_item['total']:,.0f})."
+                        )
+
+                    else:
+                        commentary.append(
+                            "No structured waste recorded this period."
+                        )
+
+                    # ---- Period Comparison ----
+                    if previous:
+
+                        if (
+                            p.food_cost_percent
+                            < previous.food_cost_percent
+                        ):
+                            commentary.append(
+                                "Food cost improving vs prior period."
+                            )
+                        elif (
+                            p.food_cost_percent
+                            > previous.food_cost_percent
+                        ):
+                            commentary.append(
+                                "Food cost deteriorating vs prior period."
+                            )
+
+                        if (
+                            p.waste_percent
+                            < previous.waste_percent
+                        ):
+                            commentary.append(
+                                "Waste improving vs prior period."
+                            )
+                        elif (
+                            p.waste_percent
+                            > previous.waste_percent
+                        ):
+                            commentary.append(
+                                "Waste increasing vs prior period."
+                            )
+
+                    st.markdown(
+                        "### 🧠 Executive Commentary"
                     )
 
-                 top_item = item_summary.iloc[0]
-
-                 commentary.append(
-                     f"Highest wasted product: {top_item['item']} (${top_item['total']:,.0f})."
-                    )
-
-                else:
-                 commentary.append("No structured waste recorded this period.")
-
-                # ---- Period Comparison ----
-                if previous:
-
-                    if p.food_cost_percent < previous.food_cost_percent:
-                        commentary.append("Food cost improving vs prior period.")
-                    elif p.food_cost_percent > previous.food_cost_percent:
-                        commentary.append("Food cost deteriorating vs prior period.")
-
-                    if p.waste_percent < previous.waste_percent:
-                        commentary.append("Waste improving vs prior period.")
-                    elif p.waste_percent > previous.waste_percent:
-                        commentary.append("Waste increasing vs prior period.")
-
-
-                st.markdown("### 🧠 Executive Commentary")
-                for line in commentary:
-                    st.markdown(f"- {line}")
-
-                # =============================
-                # TOP WASTED ITEMS TABLE
-                # =============================
-
-                with st.expander("### 🗑 Top 5 Wasted Items", expanded=True):
-
-                 waste_records = (
-                     session.query(WasteLine)
-                     .filter(WasteLine.period_id == p.id)
-                     .all()
-                    )
-
-                 if waste_records:
-
-                     df_waste = pd.DataFrame([{
-                         "Item": w.item,
-                         "Reason": w.reason,
-                         "Qty": w.qty,
-                         "Total ($)": w.total
-                     } for w in waste_records])
-
-                     summary = (
-                         df_waste
-                             .groupby(["Item", "Reason"], as_index=False)
-                             .agg({
-                                 "Qty": "sum",
-                                 "Total ($)": "sum"
-                             })
-                             .sort_values("Total ($)", ascending=False)
-                             .head(5)
-                             )
-
-                     summary["Qty"] = summary["Qty"].round(2)
-                     summary["Total ($)"] = summary["Total ($)"].round(2)
-
-                     st.dataframe(summary, width="stretch")
-
-                 else:
-                     st.info("No structured waste data available for this period.")
+                    for line in commentary:
+                        st.markdown(f"- {line}")
 
                     
-
                 # =============================
                 # ITEM PERFORMANCE
                 # =============================
 
-                with st.expander("### 📊 Item Performance", expanded=True):
+                    with st.expander("### 📊 Item Performance", expanded=True):
 
-                 sales = (
-                     session.query(SalesLine)
-                     .filter(SalesLine.period_id == p.id)
-                     .all()
-                 )
+                     sales = (
+                         session.query(SalesLine)
+                         .filter(SalesLine.period_id == p.id)
+                         .all()
+                     )
 
-                 if not sales:
-                     st.info("No item-level sales data available.")
-                 else:
+                     if not sales:
+                         st.info("No item-level sales data available.")
+                     else:
 
-                     df_raw = pd.DataFrame([{
-                         "item": s.item_name,
-                         "qty": s.qty,
-                         "revenue": s.revenue,
-                         "gp_pct": s.gross_profit_percent
-                     } for s in sales])
+                         df_raw = pd.DataFrame([{
+                             "item": s.item_name,
+                             "qty": s.qty,
+                             "revenue": s.revenue,
+                             "gp_pct": s.gross_profit_percent
+                         } for s in sales])
 
-                     df_raw = df_raw[df_raw["qty"] > 0]
+                         df_raw = df_raw[df_raw["qty"] > 0]
 
-                     if not df_raw.empty:
+                         if not df_raw.empty:
 
                          # Weighted GP calculation
-                         df_raw["gp_dollars"] = df_raw["revenue"] * (df_raw["gp_pct"] / 100)
+                             df_raw["gp_dollars"] = df_raw["revenue"] * (df_raw["gp_pct"] / 100)
 
-                         df = (
-                             df_raw
-                             .groupby("item", as_index=False)
-                             .agg({
-                                 "qty": "sum",
-                                 "revenue": "sum",
-                                 "gp_dollars": "sum"
-                             })
-                         )
-
-                         df["gp_pct"] = (df["gp_dollars"] / df["revenue"]) * 100
-                         df["gp_pct"] = df["gp_pct"].round(1)
-                         df["gp_dollars"] = df["gp_dollars"].round(2)
-
-                         if not df.empty:
-
-                             colA, colB = st.columns(2)
-
-                             with colA:
-                                 st.markdown("**Top Sellers by Revenue**")
-                                 for _, row in df.sort_values("revenue", ascending=False).head(5).iterrows():
-                                     st.write(f"{row['item']} — ${row['revenue']:,.0f}")
-
-                                 st.markdown("**Top Sellers by Volume**")
-                                 for _, row in df.sort_values("qty", ascending=False).head(5).iterrows():
-                                     st.write(f"{row['item']} ({int(row['qty'])})")
-
-                             with colB:
-                                 st.markdown("**Top Profit Generators**")
-                                 for _, row in df.sort_values("gp_dollars", ascending=False).head(5).iterrows():
-                                     st.write(
-                                         f"{row['item']} — ${row['gp_dollars']:,.0f} "
-                                         f"({row['gp_pct']:.1f}% | {int(row['qty'])} sold)"
-                                     )
-
-                                 st.markdown("**Lowest Sellers by Volume**")
-                                 for _, row in df.sort_values("qty").head(5).iterrows():
-                                     st.write(f"{row['item']} ({int(row['qty'])})")
-
-                             # Revenue concentration
-                             top_item = df.sort_values("revenue", ascending=False).iloc[0]
-                             if p.revenue > 0:
-                                 contribution = (top_item["revenue"] / p.revenue) * 100
-                             else:
-                                 contribution = 0
-
-                             st.markdown(
-                                 f"🔎 **{top_item['item']} contributes {contribution:.1f}% of total revenue.**"
+                             df = (
+                                 df_raw
+                                 .groupby("item", as_index=False)
+                                 .agg({
+                                     "qty": "sum",
+                                     "revenue": "sum",
+                                     "gp_dollars": "sum"
+                                 })
                              )
 
-                             if contribution > 15:
-                                 st.warning("High revenue concentration risk detected.")
+                             df["gp_pct"] = (df["gp_dollars"] / df["revenue"]) * 100
+                             df["gp_pct"] = df["gp_pct"].round(1)
+                             df["gp_dollars"] = df["gp_dollars"].round(2)
+
+                             if not df.empty:
+
+                                 colA, colB = st.columns(2)
+
+                                 with colA:
+                                     st.markdown("**Top Sellers by Revenue**")
+                                     for _, row in df.sort_values("revenue", ascending=False).head(5).iterrows():
+                                         st.write(f"{row['item']} — ${row['revenue']:,.0f}")
+
+                                     st.markdown("**Top Sellers by Volume**")
+                                     for _, row in df.sort_values("qty", ascending=False).head(5).iterrows():
+                                         st.write(f"{row['item']} ({int(row['qty'])})")
+
+                                 with colB:
+                                     st.markdown("**Top Profit Generators**")
+                                     for _, row in df.sort_values("gp_dollars", ascending=False).head(5).iterrows():
+                                         st.write(
+                                             f"{row['item']} — ${row['gp_dollars']:,.0f} "
+                                             f"({row['gp_pct']:.1f}% | {int(row['qty'])} sold)"
+                                         )
+
+                                     st.markdown("**Lowest Sellers by Volume**")
+                                     for _, row in df.sort_values("qty").head(5).iterrows():
+                                         st.write(f"{row['item']} ({int(row['qty'])})")
+
+                             # Revenue concentration
+                                 top_item = df.sort_values("revenue", ascending=False).iloc[0]
+                                 if p.revenue > 0:
+                                     contribution = (top_item["revenue"] / p.revenue) * 100
+                                 else:
+                                     contribution = 0
+
+                                 st.markdown(
+                                     f"🔎 **{top_item['item']} contributes {contribution:.1f}% of total revenue.**"
+                                 )
+
+                                 if contribution > 15:
+                                     st.warning("High revenue concentration risk detected.")
 
                              # =============================
                              # MENU PERFORMANCE SUMMARY
                              # =============================
 
-                             with st.expander("### 📊 Menu Performance Summary", expanded=True):
+                                 with st.expander("### 📊 Menu Performance Summary", expanded=True):
 
-                                 avg_margin = df["gp_pct"].mean()
-                                 avg_qty = df["qty"].mean()
+                                     avg_margin = df["gp_pct"].mean()
+                                     avg_qty = df["qty"].mean()
 
-                                 risk_items = df[
-                                     (df["qty"] > avg_qty) &
-                                     (df["gp_pct"] < avg_margin)
-                                 ].sort_values("qty", ascending=False)
+                                     risk_items = df[
+                                         (df["qty"] > avg_qty) &
+                                         (df["gp_pct"] < avg_margin)
+                                     ].sort_values("qty", ascending=False)
 
-                                 if not risk_items.empty:
-                                     st.markdown("#### ⚠ High Volume, Low Margin (Review Pricing)")
-                                     for _, row in risk_items.head(5).iterrows():
-                                         st.write(
-                                             f"{row['item']} — {row['qty']} sold | {row['gp_pct']:.1f}% GP"
-                                         )
+                                     if not risk_items.empty:
+                                         st.markdown("#### ⚠ High Volume, Low Margin (Review Pricing)")
+                                         for _, row in risk_items.head(5).iterrows():
+                                             st.write(
+                                                 f"{row['item']} — {row['qty']} sold | {row['gp_pct']:.1f}% GP"
+                                            )
 
-                                 low_volume = df[df["qty"] < avg_qty].sort_values("qty")
+                                     low_volume = df[df["qty"] < avg_qty].sort_values("qty")
 
-                                 if not low_volume.empty:
-                                     st.markdown("#### 💤 Low Volume Items")
-                                     for _, row in low_volume.head(5).iterrows():
-                                         st.write(
-                                             f"{row['item']} — {row['qty']} sold"
-                                        )
+                                     if not low_volume.empty:
+                                         st.markdown("#### 💤 Low Volume Items")
+                                         for _, row in low_volume.head(5).iterrows():
+                                             st.write(
+                                                 f"{row['item']} — {row['qty']} sold"
+                                             )
 
-            previous_by_type[p.report_type] = p
 
 session.close()
